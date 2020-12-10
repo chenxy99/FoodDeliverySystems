@@ -12,11 +12,13 @@ from models.actor_critic import ActorCritic
 
 parser = argparse.ArgumentParser(description="Food delivery systems")
 parser.add_argument("--log_root", type=str, default="./assets/", help="Log root")
-parser.add_argument("--resume_dir", type=str, default="", help="Resume from a specific directory")
-parser.add_argument("--city_size", type=int, default=128, help="Size of the city map")
+parser.add_argument("--resume_dir", type=str, default="./assets/log_20201209_2027", help="Resume from a specific directory")
+parser.add_argument("--city_size", type=int, default=64, help="Size of the city map")
 parser.add_argument("--seed", type=int, default=0, help="Random seed")
 parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
 parser.add_argument("--clip", type=float, default=12.5, help="Gradient clipping")
+parser.add_argument("--log_every", type=int, default=100, help="Log step")
+parser.add_argument("--smooth_factor", type=float, default=0.6, help="Smooth factor")
 
 # Actor
 parser.add_argument("--beta", type=float, default=0.1, help="Entropy regularization weight")
@@ -30,7 +32,7 @@ parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
 parser.add_argument("--lam", type=float, default=0.97, help="Soft choice for GAE")
 parser.add_argument("--duration", type=int, default=20, help="Length of the samples (s_t, a_t, r_t, s_t')")
 parser.add_argument("--episode", type=int, default=1000000, help="Number of the total episodes")
-parser.add_argument("--num_people", type=int, default=5, help="Number of people")
+parser.add_argument("--num_people", type=int, default=3, help="Number of people")
 
 args = parser.parse_args()
 
@@ -69,9 +71,8 @@ def main():
     for (key, value) in vars(args).items():
         logger.info("{key:20}: {value:}".format(key=key, value=value))
 
-    actor_critic = ActorCritic(args)
-    for eposide in tqdm(range(args.episode)):
-        actor_critic.train()
+    actor_critic = ActorCritic(args, log_dir, checkpoints_dir)
+    actor_critic.train()
 
 if __name__ == "__main__":
     main()

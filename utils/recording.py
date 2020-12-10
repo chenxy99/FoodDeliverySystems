@@ -21,15 +21,17 @@ class RecordManager(object):
         self.record['epoch'] = -1
         self.record['iteration'] = -1
         self.record['best_metric'] = None
+        self.record['current_metric'] = 0
 
     def load(self):
         with open(join(self._serialization_dir, self._filename_prefix + '.json'), 'r') as f:
             self.record = json.load(f)
 
-    def save(self, epoch, iteration, best_metric):
+    def save(self, epoch, iteration, best_metric, current_metric):
         self.record['epoch'] = epoch
         self.record['iteration'] = iteration
         self.record['best_metric'] = best_metric
+        self.record['current_metric'] = current_metric
         with open(join(self._serialization_dir, self._filename_prefix + '.json'), 'w') as f:
             json.dump(self.record, f, indent=2)
 
@@ -45,3 +47,6 @@ class RecordManager(object):
 
     def get_best_metric(self):
         return self.record['best_metric']
+
+    def get_current_metric(self):
+        return self.record['current_metric']

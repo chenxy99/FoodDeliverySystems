@@ -7,25 +7,34 @@ import math
 import sys
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+from tqdm import tqdm
 
 import models.math_util as math_util
+from utils.recording import RecordManager
+from utils.checkpointing import CheckpointManager
 
 epsilon = 1e-8
 
 class ActorCritic(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, log_dir, checkpoints_dir):
         super(ActorCritic, self).__init__()
         self.args = args
+        self.log_dir = log_dir
+        self.checkpoints_dir = checkpoints_dir
+        self.current_metric = 0
         self.actor = Actor(args).cuda()
         self.critic = Critic(args).cuda()
+
 
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=args.alpha_a, betas=(0.9, 0.999),
                                           eps=1e-08, weight_decay=args.weight_decay)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=args.alpha_c, betas=(0.9, 0.999),
                                            eps=1e-08, weight_decay=args.weight_decay)
 
+        self.initialize()
 
-    def train(self):
+    def one_iteration(self):
         # batch = SampleEpisode()
         # for testing
         batch = dict()
@@ -82,8 +91,21 @@ class ActorCritic(nn.Module):
         self.actor_optimizer.step()
         self.critic_optimizer.step()
 
-        # print(loss.item)
+        self.current_metric = self.args.smooth_factor * self.current_metric + \
+                              (1 - self.args.smooth_factor) * v_targets.mean().cpu().numpy()
 
+    def train(self):
+        with tqdm(total=self.args.episode, initial=self.iteration + 1) as pbar:
+            for eposide in range(self.iteration, self.args.episode):
+                self.one_iteration()
+
+                if eposide % self.args.log_every == 0 and eposide > 0:
+                    # save
+                    self.actor_checkpoint_manager.step(self.current_metric)
+                    self.critic_checkpoint_manager.step(self.current_metric)
+                    self.best_metric = self.actor_checkpoint_manager.get_best_metric()
+                    self.record_manager.save(0, eposide, self.best_metric, self.current_metric)
+                pbar.update(1)
 
 
     def calc_GAE_advs_v_target(self, batch, v_preds):
@@ -103,8 +125,44 @@ class ActorCritic(nn.Module):
         advs = math_util.standardize(v_targets)
         return advs, v_targets
 
+    def initialize(self):
+        # Record manager for writing and loading the best metrics and theirs corresponding epoch
+        self.record_manager = RecordManager(self.log_dir)
+        if self.args.resume_dir == '':
+            self.record_manager.init_record()
+        else:
+            self.record_manager.load()
 
+        self.start_epoch = self.record_manager.get_epoch()
+        self.iteration = self.record_manager.get_iteration()
+        self.best_metric = self.record_manager.get_best_metric()
+        self.current_metric = self.record_manager.get_current_metric()
 
+        # Checkpoint manager to serialize checkpoints periodically while training and keep track of
+        # best performing checkpoint.
+        self.actor_checkpoint_manager = CheckpointManager(self.actor, self.actor_optimizer, self.checkpoints_dir,
+                                                          mode="max", best_metric=self.best_metric,
+                                                          filename_prefix="actor_checkpoint")
+        self.critic_checkpoint_manager = CheckpointManager(self.critic, self.critic_optimizer, self.checkpoints_dir,
+                                                           mode="max", best_metric=self.best_metric,
+                                                           filename_prefix="critic_checkpoint")
+
+        # Load checkpoint to resume training from there if specified.
+        # Infer iteration number through file name (it's hacky but very simple), so don't rename
+        # saved checkpoints if you intend to continue training.
+        if self.args.resume_dir != "":
+            training_checkpoint = torch.load(os.path.join(self.checkpoints_dir, "actor_checkpoint.pth"))
+            for key in training_checkpoint:
+                if key == "optimizer":
+                    self.actor_optimizer.load_state_dict(training_checkpoint[key])
+                else:
+                    self.actor.load_state_dict(training_checkpoint[key])
+            training_checkpoint = torch.load(os.path.join(self.checkpoints_dir, "critic_checkpoint.pth"))
+            for key in training_checkpoint:
+                if key == "optimizer":
+                    self.critic_optimizer.load_state_dict(training_checkpoint[key])
+                else:
+                    self.critic.load_state_dict(training_checkpoint[key])
 
 
 class Actor(nn.Module):
