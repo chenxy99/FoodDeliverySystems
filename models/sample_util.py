@@ -86,7 +86,7 @@ def generatePosMap(mask, params):
     while(1):
         y = np.random.randint(0, h)
         x = np.random.randint(0, w)
-        if mask[y, x] == 1:
+        if mask[y, x] != 1:
             m[y, x] = 1
             break
     return m
@@ -179,6 +179,7 @@ def SampleEpisode(model, params=sample_params, duration=250):
     states.append(pickup_m)
     money_m = generateMoneyMap(sample_params).reshape([1, h, w])
     states.append(money_m)
+
     for i in range(params["num_delivers"]):
         pos_map = generatePosMap(params, obs_mask).reshape([1, h, w])
         pre_pickup_m = np.zeros([1, h, w])
@@ -217,4 +218,3 @@ def SampleEpisode(model, params=sample_params, duration=250):
     # eposide['donws'] = torch.from_numpy(np.concatenate(all_dones, axis=0))
     
     return eposide
-
