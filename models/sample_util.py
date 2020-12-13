@@ -4,7 +4,8 @@ import numpy as np
 epsilon = 1e-8
 
 # issues to be finished
-# 1. here we assume 1 order is generated each time now
+# 1. here we assume 1 order is generated each time now, if more orders at each time, need to modify
+# OrderPack
 # 2. distinguish between pickup and money pair
 # 3. where to limit the pickup 
 # 4. should we generate eposide with tensor rather than numpy array?
@@ -20,9 +21,11 @@ sample_params = {
     "reject_cost": -3,
     "min_reward": 5,
     "max_reward": 20,
+    "pickup_reward":2 ,
     "num_obstacle": int(5),
     "obstacle_ratio_h": 0.5,
-    "obstacle_ratio_w": 0.5
+    "obstacle_ratio_w": 0.5,
+    "max_order": 2
 }
 
 
@@ -67,7 +70,7 @@ def generatePickupMap(params):
     y = np.random.randint(0, h)
     x = np.random.randint(0, w)
     # q1 here, what reward to assign to the pickup location
-    m[y, x] = 1
+    m[y, x] = params["pickup_reward"]
     return m/params["abs"]
 
 # generate the map for money delievery
@@ -120,7 +123,7 @@ def oneStepMove(pre_pos_map, people_action):
     new_pos_map[tuple(new_pos_ind)] = 1
     return new_pos_map, new_pos_ind
 
-def getNextStateReward(last_state, pickup_controls, people_actions, params):
+def getNextStateReward(last_state, pickup_controls, people_actions, order_recorder, params):
     h, w = params['h'], params['w']
     # we generate the initial state
     # the channel order of states are
@@ -159,38 +162,47 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
         states[0, 3*(i+1)] = new_pos_map
 
         # update pick up m
+        picked = False
         pre_pickup_m = last_state[0, 1+3*(i+1)]
-        if control == i:
+        if control == i and np.sum(pre_pickup_m)<params["max_order"]:
+            picked = True
             last_pickup_m = last_state[0, 1]
+            last_money_m = last_state[0, 2]
             pre_pickup_m = pre_pickup_m + last_pickup_m
-            pre_pickup_m[new_pos_ind] = 0
             states[0, 1+3*(i+1)] = pre_pickup_m
-        if pre_pickup_m[tuple(new_pos_ind)] != 0:
-            rewards = rewards + pre_pickup_m[tuple(new_pos_ind)]
+            # add new order to order pack
+            order_ind = np.array(np.where(last_pickup_m>0)).reshape([2])
+            money_ind = np.array(np.where(last_money_m>0)).reshape([2])
+            order_recorder.add_order(i, order_ind, money_ind, np.sum(last_money_m))
+
+        if pre_pickup_m[tuple(new_pos_ind)] > 0:
+            pick_reward = order_recorder.pick_order(i, new_pos_ind)
+            rewards = rewards + pick_reward
+            pre_pickup_m[tuple(new_pos_ind)] = pre_pickup_m[tuple(new_pos_ind)] - pick_reward
             # print(pre_pickup_m[tuple(new_pos_ind)])
-            pre_pickup_m[tuple(new_pos_ind)] = 0
         states[0, 1+3*(i+1)] = pre_pickup_m
 
         # update money m
         pre_money_m = last_state[0, 2+3*(i+1)]
-        if control == i:
+        if picked: # means the order is accept
             pre_money_m = last_state[0, 2+3*(i+1)]
             last_money_m = last_state[0, 2]
             pre_money_m = pre_money_m + last_money_m
-        if pre_money_m[tuple(new_pos_ind)] != 0:
-            rewards = rewards + pre_money_m[tuple(new_pos_ind)]
+        if pre_money_m[tuple(new_pos_ind)] > 0: # possible to finish an order
+            money_reward = order_recorder.finish_order(i, new_pos_ind)
+            rewards = rewards + money_reward
             # print(pre_money_m[tuple(new_pos_ind)])
-            pre_money_m[tuple(new_pos_ind)] = 0
+            pre_money_m[tuple(new_pos_ind)] = pre_money_m[tuple(new_pos_ind)] - money_reward
         states[0, 2+3*(i+1)] = pre_money_m
         
-        # calculate rewards
+        # calculate gas cost rewards
         rewards = rewards + states[0, 0, new_pos_ind[0], new_pos_ind[1]]
         # print(states[0, 0, new_pos_ind[0], new_pos_ind[1]])
 
     # when the order is reject
     if control == params["num_delivers"]:
         rewards = rewards + params["reject_cost"]
-    return states, rewards.reshape([1, 1])
+    return states, rewards.reshape([1, 1]), order_recorder
 
 
 # this function returns the whole eposide of samples, given the 
@@ -211,6 +223,10 @@ def SampleEpisode(model, params=sample_params, duration=250):
     states.append(pickup_m)
     money_m = generateMoneyMap(sample_params).reshape([1, h, w])
     states.append(money_m)
+
+    # here we create a order pack to record whether the food of a order has already been collected
+    # h,w,reward
+    order_recorder = OrderPack(params["num_delivers"], params["max_order"], params)
 
     for i in range(params["num_delivers"]):
         pos_map = generatePosMap(obs_mask, params).reshape([1, h, w])
@@ -239,7 +255,8 @@ def SampleEpisode(model, params=sample_params, duration=250):
         # people_actions = torch.from_numpy(people_actions)
 
         # get the rewards and next state in np structure
-        states, rewards = getNextStateReward(last_state, pickup_controls, people_actions, params)
+        states, rewards, order_recorder = getNextStateReward(
+            last_state, pickup_controls, people_actions, order_recorder, params)
         print('cut:{reward}'.format(reward=rewards[0]))
         all_states.append(states)
         all_rewards.append(rewards)
@@ -255,5 +272,56 @@ def SampleEpisode(model, params=sample_params, duration=250):
     # eposide['people_actions'] = torch.from_numpy(np.concatenate(all_people_actions, axis=0))
     # eposide['donws'] = torch.from_numpy(np.concatenate(all_dones, axis=0))
     return eposide
+
+# here we define a class to manage order
+class OrderPack(object):
+    def __init__(self, num_delivers, max_order, params):
+        # order_h,order_w, money_h, money_w, reward, picked
+        # reward=0 indicates empty
+        self.data = np.zeros([num_delivers, max_order, 6])
+        self.num_delivers = num_delivers
+        self.max_order = max_order
+        self.params = params
+        return
+
+    # we assume no order has reward smaller than 0
+    def add_order(self, deliver_id, order_ind, money_ind, money):
+        for i in range(self.max_order):
+            if self.data[deliver_id, i, 4] == 0:
+                self.data[deliver_id, i] = [
+                    order_ind[0], order_ind[1], money_ind[0], money_ind[1], money, False]
+                break
+            else:
+                continue
+
+    def pick_order(self, deliver_id, order_ind):
+        reward = 0
+        for i in range(self.max_order):
+            if self.data[deliver_id, i, 4] != 0 and self.check_pos(self.data[deliver_id, i, 0:2], order_ind):  
+                reward = reward + self.params["pickup_reward"]
+                self.data[deliver_id, i, 5] = True
+            else:
+                continue
+        return reward
+
+    def finish_order(self, deliver_id, money_ind):
+        reward = 0
+        for i in range(self.max_order):
+            if self.data[deliver_id, i, 4] != 0 and self.check_pos(self.data[deliver_id, i, 2:4], money_ind) and self.data[deliver_id, i, 5]:  
+                reward = reward + self.data[deliver_id, i, 4]
+                self.data[deliver_id, i, 4] = 0
+            else:
+                continue
+        return reward
+
+    def check_pos(self, a, b):
+        ans = True
+        for i in range(len(a)):
+            if a[i] == b[i]:
+                continue
+            else:
+                ans = False
+                break
+        return ans
 
 # SampleEpisode(0)
