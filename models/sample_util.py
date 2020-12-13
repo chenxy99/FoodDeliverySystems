@@ -99,14 +99,14 @@ def oneStepMove(pre_pos_map, people_action):
     h, w = pre_pos_map.shape
     pre_pos_ind = np.array(np.where(pre_pos_map==1))
     new_pos_ind = pre_pos_ind
-    if people_action == 0: # move left
+    if people_action[0, 0] == 1: # move up
+        new_pos_ind[1] = np.max(new_pos_ind[0]-1, 0)
+    elif people_action[0, 1] == 1: # move down
+        new_pos_ind[0] = np.min(new_pos_ind[0]+1, h)
+    elif people_action[0, 2] == 1: # move left
         new_pos_ind[1] = np.max(new_pos_ind[1]-1, 0)
-    elif people_action == 1: # move up
-        new_pos_ind[0] = np.max(new_pos_ind[1]-1, 0)
-    elif people_action == 2: # move right
-        new_pos_ind[1] = np.min(new_pos_ind[1]+1, w)
-    elif people_action == 3: # move down
-        new_pos_ind[0] = np.min(new_pos_ind[1]+1, h)
+    elif people_action[0, 3] == 1: # move right
+        new_pos_ind[0] = np.min(new_pos_ind[1]+1, w)
     new_pos_map = np.zeros_like(pre_pos_map)
     new_pos_map[new_pos_ind] = 1
     return new_pos_map, new_pos_ind
@@ -131,7 +131,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
 
         # update pick up m
         pre_pickup_m = last_state[0, 1+3*(i+1)]
-        if pickup_controls[i]==1:
+        if pickup_controls[0, i]==1:
             last_pickup_m = last_state[0, 1]
             pre_pickup_m = pre_pickup_m + last_pickup_m
             pre_pickup_m[new_pos_ind] = 0
@@ -143,7 +143,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
 
         # update money m
         pre_money_m = last_state[0, 2+3*(i+1)]
-        if pickup_controls[i]==1:
+        if pickup_controls[0, i]==1:
             pre_money_m = last_state[0, 2+3*(i+1)]
             last_money_m = last_state[0, 2]
             pre_money_m = pre_money_m + last_money_m
@@ -198,10 +198,11 @@ def SampleEpisode(model, params=sample_params, duration=250):
 
 
     for i in range(duration):
+        # convert states from np into tensor
         last_state = torch.from_numpy(all_states[-1])
         pickup_controls, people_actions = model.actor(last_state)
 
-        # get the rewards and next state
+        # get the rewards and next state in np structure
         states, rewards = getNextStateReward(last_state, pickup_controls, people_actions, params)
         all_states.append(states)
         all_rewards.append(rewards)
