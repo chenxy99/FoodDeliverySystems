@@ -98,13 +98,13 @@ def oneStepMove(pre_pos_map, people_action):
     h, w = pre_pos_map.shape
     pre_pos_ind = np.array(np.where(pre_pos_map==1))
     new_pos_ind = pre_pos_ind
-    if people_action[0, 0] == 1: # move up
+    if people_action.data[0, 0] == 1: # move up
         new_pos_ind[1] = np.max(new_pos_ind[0]-1, 0)
-    elif people_action[0, 1] == 1: # move down
+    elif people_action.data[0, 1] == 1: # move down
         new_pos_ind[0] = np.min(new_pos_ind[0]+1, h)
-    elif people_action[0, 2] == 1: # move left
+    elif people_action.data[0, 2] == 1: # move left
         new_pos_ind[1] = np.max(new_pos_ind[1]-1, 0)
-    elif people_action[0, 3] == 1: # move right
+    elif people_action.data[0, 3] == 1: # move right
         new_pos_ind[0] = np.min(new_pos_ind[1]+1, w)
     new_pos_map = np.zeros_like(pre_pos_map)
     new_pos_map[new_pos_ind] = 1
@@ -118,11 +118,13 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
     # pickup map
     # money map
     # iternate: position of deliever, pickup position of deliever, money position of deliever
+    last_state = last_state.data
     states = np.zeros((1, 3+3*params["num_delivers"], h, w), np.float32)
     states[0, 0] = last_state[0, 0]     # map doesn't change
     states[0, 1] = generatePickupMap(sample_params).reshape([h, w]) # generate new pickup
     states[0, 2] = generateMoneyMap(sample_params).reshape([h, w]) # generate new money
     rewards = 0
+
     for i in range(params["num_delivers"]):
         # update pos map
         new_pos_map, new_pos_ind = oneStepMove(states[0, 3*(i+1)], people_actions[i])
@@ -130,7 +132,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
 
         # update pick up m
         pre_pickup_m = last_state[0, 1+3*(i+1)]
-        if pickup_controls[0, i]==1:
+        if pickup_controls.data[0, i]==1:
             last_pickup_m = last_state[0, 1]
             pre_pickup_m = pre_pickup_m + last_pickup_m
             pre_pickup_m[new_pos_ind] = 0
@@ -142,7 +144,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
 
         # update money m
         pre_money_m = last_state[0, 2+3*(i+1)]
-        if pickup_controls[0, i]==1:
+        if pickup_controls.data[0, i]==1:
             pre_money_m = last_state[0, 2+3*(i+1)]
             last_money_m = last_state[0, 2]
             pre_money_m = pre_money_m + last_money_m
