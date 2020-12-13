@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-from actor_critic import ActorCritic
 
 
 # issues to be finished
@@ -47,7 +46,7 @@ def addObstacle(m, ys, xs, params):
 def generateMap(params=sample_params):
     # initalize the map
     h, w = params['h'], params['w']
-    m = np.zeros([h, w])
+    m = np.zeros([h, w], dtype=np.float32)
     m = m + params["gas_cost"]
 
     # add in number of obstacle
@@ -63,7 +62,7 @@ def generateMap(params=sample_params):
 # generate the map for pickup
 def generatePickupMap(params):
     h, w = params['h'], params['w']
-    m = np.zeros(h, w)
+    m = np.zeros((h, w), dtype=np.float32)
     y = np.random.randint(0, h)
     x = np.random.randint(0, w)
     # q1 here, what reward to assign to the pickup location
@@ -73,7 +72,7 @@ def generatePickupMap(params):
 # generate the map for money delievery
 def generateMoneyMap(params):
     h, w = params['h'], params['w']
-    m = np.zeros(h, w)
+    m = np.zeros((h, w), dtype=np.float32)
     y = np.random.randint(0, h)
     x = np.random.randint(0, w)
     m[y, x] = np.random.randint(params["min_reward"], params["max_reward"])
@@ -82,7 +81,7 @@ def generateMoneyMap(params):
 # generate position map
 def generatePosMap(mask, params):
     h, w = params['h'], params['w']
-    m = np.zeros(h, w)
+    m = np.zeros((h, w), dtype=np.float32)
     while(1):
         y = np.random.randint(0, h)
         x = np.random.randint(0, w)
@@ -119,7 +118,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, params):
     # pickup map
     # money map
     # iternate: position of deliever, pickup position of deliever, money position of deliever
-    states = np.zeros_like([1, 3+3*params["num_delivers"], h, w])
+    states = np.zeros((1, 3+3*params["num_delivers"], h, w), np.float32)
     states[0, 0] = last_state[0, 0]     # map doesn't change
     states[0, 1] = generatePickupMap(sample_params).reshape([h, w]) # generate new pickup
     states[0, 2] = generateMoneyMap(sample_params).reshape([h, w]) # generate new money
@@ -181,9 +180,9 @@ def SampleEpisode(model, params=sample_params, duration=250):
     states.append(money_m)
 
     for i in range(params["num_delivers"]):
-        pos_map = generatePosMap(params, obs_mask).reshape([1, h, w])
-        pre_pickup_m = np.zeros([1, h, w])
-        pre_money_m = np.zeros([1, h, w])
+        pos_map = generatePosMap(obs_mask, params).reshape([1, h, w])
+        pre_pickup_m = np.zeros([1, h, w], dtype=np.float32)
+        pre_money_m = np.zeros([1, h, w], dtype=np.float32)
         states.append(pos_map)
         states.append(pre_pickup_m)
         states.append(pre_money_m)
@@ -200,6 +199,7 @@ def SampleEpisode(model, params=sample_params, duration=250):
     for i in range(duration):
         # convert states from np into tensor
         last_state = torch.from_numpy(all_states[-1])
+        last_state = last_state.cuda()
         pickup_controls, people_actions = model.actor(last_state)
 
         # get the rewards and next state in np structure

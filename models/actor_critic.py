@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
 import torchvision
 import math
 import sys
@@ -11,8 +12,10 @@ import os
 from tqdm import tqdm
 
 import models.math_util as math_util
+from models.sample_util import SampleEpisode
 from utils.recording import RecordManager
 from utils.checkpointing import CheckpointManager
+
 
 epsilon = 1e-8
 
@@ -35,21 +38,21 @@ class ActorCritic(nn.Module):
         self.initialize()
 
     def one_iteration(self):
-        # batch = SampleEpisode()
+        batch = SampleEpisode(self)
         # for testing
-        batch = dict()
-        batch["states"] = torch.randn((self.args.duration + 1, self.args.num_people * 3 + 3,
-                                       self.args.city_size, self.args.city_size))
-        batch["rewards"] = torch.randn((self.args.duration, 1))
-        batch["dones"] = torch.ones((self.args.duration, 1))
-        pickup = torch.randint(low=0, high=self.args.num_people + 1, size=(self.args.duration, 1))
-        batch["pickup_controls"] = torch.zeros(self.args.duration, self.args.num_people+1).long()
-        batch["pickup_controls"].scatter_(dim=1, index=pickup,
-                                          src=torch.ones(self.args.duration, 1).long())
-        action = torch.randint(low=0, high=4, size=(self.args.num_people, self.args.duration, 1))
-        batch["people_actions"] = torch.zeros(self.args.num_people, self.args.duration, 4).long()
-        batch["people_actions"].scatter_(dim=2, index=action,
-                                         src=torch.ones(self.args.num_people, self.args.duration, 1).long())
+        # batch = dict()
+        # batch["states"] = torch.randn((self.args.duration + 1, self.args.num_people * 3 + 3,
+        #                                self.args.city_size, self.args.city_size))
+        # batch["rewards"] = torch.randn((self.args.duration, 1))
+        # batch["dones"] = torch.ones((self.args.duration, 1))
+        # pickup = torch.randint(low=0, high=self.args.num_people + 1, size=(self.args.duration, 1))
+        # batch["pickup_controls"] = torch.zeros(self.args.duration, self.args.num_people+1).long()
+        # batch["pickup_controls"].scatter_(dim=1, index=pickup,
+        #                                   src=torch.ones(self.args.duration, 1).long())
+        # action = torch.randint(low=0, high=4, size=(self.args.num_people, self.args.duration, 1))
+        # batch["people_actions"] = torch.zeros(self.args.num_people, self.args.duration, 4).long()
+        # batch["people_actions"].scatter_(dim=2, index=action,
+        #                                  src=torch.ones(self.args.num_people, self.args.duration, 1).long())
 
         for key, value in batch.items():
             batch[key] = value.cuda()
@@ -98,6 +101,7 @@ class ActorCritic(nn.Module):
         with tqdm(total=self.args.episode, initial=self.iteration + 1) as pbar:
             for eposide in range(self.iteration, self.args.episode):
                 self.one_iteration()
+                self.tensorboard_writer.add_scalar("reward", self.current_metric, eposide)
 
                 if eposide % self.args.log_every == 0 and eposide > 0:
                     # save
@@ -126,6 +130,13 @@ class ActorCritic(nn.Module):
         return advs, v_targets
 
     def initialize(self):
+        # --------------------------------------------------------------------------------------------
+        #  BEFORE TRAINING STARTS
+        # --------------------------------------------------------------------------------------------
+
+        # Tensorboard summary writer for logging losses and metrics.
+        self.tensorboard_writer = SummaryWriter(log_dir=self.log_dir)
+
         # Record manager for writing and loading the best metrics and theirs corresponding epoch
         self.record_manager = RecordManager(self.log_dir)
         if self.args.resume_dir == '':
