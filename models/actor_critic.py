@@ -26,6 +26,8 @@ class ActorCritic(nn.Module):
         self.log_dir = log_dir
         self.checkpoints_dir = checkpoints_dir
         self.current_metric = 0
+        self.current_eposide = 0.0
+        self.duration = 0
         self.actor = Actor(args).cuda()
         self.critic = Critic(args).cuda()
 
@@ -34,17 +36,23 @@ class ActorCritic(nn.Module):
                                           eps=1e-08, weight_decay=args.weight_decay)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=args.alpha_c, betas=(0.9, 0.999),
                                            eps=1e-08, weight_decay=args.weight_decay)
-
-        self.initialize()
+        if self.args.eval:
+            self.load_optimal_parameters()
+        else:
+            self.initialize()
 
     def one_iteration(self):
-        batch = SampleEpisode(self)
+        if self.args.eval:
+            self.duration = self.args.duration
+        else:
+            self.duration = int(self.current_eposide / float(self.args.episode) * self.args.duration) + 2
+        batch = SampleEpisode(self, duration=self.duration)
         # for testing
         # batch = dict()
         # batch["states"] = torch.randn((self.args.duration + 1, self.args.num_people * 3 + 3,
         #                                self.args.city_size, self.args.city_size))
         # batch["rewards"] = torch.randn((self.args.duration, 1))
-        # batch["dones"] = torch.ones((self.args.duration, 1))
+        batch["dones"] = torch.ones((self.duration, 1))
         # pickup = torch.randint(low=0, high=self.args.num_people + 1, size=(self.args.duration, 1))
         # batch["pickup_controls"] = torch.zeros(self.args.duration, self.args.num_people+1).long()
         # batch["pickup_controls"].scatter_(dim=1, index=pickup,
@@ -57,10 +65,10 @@ class ActorCritic(nn.Module):
         for key, value in batch.items():
             batch[key] = value.cuda()
 
-        assert batch["states"].size() == (self.args.duration + 1, self.args.num_people * 3 + 3,
+        assert batch["states"].size() == (self.duration + 1, self.args.num_people * 3 + 3,
                                            self.args.city_size, self.args.city_size)
-        assert batch["rewards"].size() == (self.args.duration, 1)
-        assert batch["dones"].size() == (self.args.duration, 1)
+        assert batch["rewards"].size() == (self.duration, 1)
+        assert batch["dones"].size() == (self.duration, 1)
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
@@ -97,11 +105,14 @@ class ActorCritic(nn.Module):
         self.current_metric = self.args.smooth_factor * self.current_metric + \
                               (1 - self.args.smooth_factor) * v_targets.mean().cpu().numpy()
 
+
     def train(self):
         with tqdm(total=self.args.episode, initial=self.iteration + 1) as pbar:
             for eposide in range(self.iteration, self.args.episode):
+                self.current_eposide = eposide
                 self.one_iteration()
                 self.tensorboard_writer.add_scalar("reward", self.current_metric, eposide)
+                self.tensorboard_writer.add_scalar("duration", self.duration, eposide)
 
                 if eposide % self.args.log_every == 0 and eposide > 0:
                     # save
@@ -110,6 +121,29 @@ class ActorCritic(nn.Module):
                     self.best_metric = self.actor_checkpoint_manager.get_best_metric()
                     self.record_manager.save(0, eposide, self.best_metric, self.current_metric)
                 pbar.update(1)
+
+    def evaluation(self):
+        if self.args.eval:
+            self.duration = self.args.duration
+        else:
+            self.duration = int(self.current_eposide / float(self.args.episode) * self.args.duration) + 2
+        with torch.no_grad():
+            batch = SampleEpisode(self, duration=self.duration)
+            # for testing
+            batch["dones"] = torch.ones((self.duration, 1))
+
+            for key, value in batch.items():
+                batch[key] = value.cuda()
+
+            assert batch["states"].size() == (self.duration + 1, self.args.num_people * 3 + 3,
+                                               self.args.city_size, self.args.city_size)
+            assert batch["rewards"].size() == (self.duration, 1)
+            assert batch["dones"].size() == (self.duration, 1)
+
+            # get the predictions of each states from critic excluding the last state
+            v_preds = self.critic(batch["states"][:-1])
+
+            print("The average award function is :{v_preds}".format(v_preds=v_preds.mean()))
 
 
     def calc_GAE_advs_v_target(self, batch, v_preds):
@@ -174,6 +208,22 @@ class ActorCritic(nn.Module):
                     self.critic_optimizer.load_state_dict(training_checkpoint[key])
                 else:
                     self.critic.load_state_dict(training_checkpoint[key])
+
+    def load_optimal_parameters(self):
+        # Load checkpoint to start evaluation.
+        # Infer iteration number through file name (it's hacky but very simple), so don't rename
+        test_checkpoint = torch.load(os.path.join(self.checkpoints_dir, "actor_checkpoint_best.pth"))
+        for key in test_checkpoint:
+            if key == "optimizer":
+                continue
+            else:
+                self.actor.load_state_dict(test_checkpoint[key], strict=False)
+        test_checkpoint = torch.load(os.path.join(self.checkpoints_dir, "critic_checkpoint_best.pth"))
+        for key in test_checkpoint:
+            if key == "optimizer":
+                continue
+            else:
+                self.critic.load_state_dict(test_checkpoint[key], strict=False)
 
 
 class Actor(nn.Module):

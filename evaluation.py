@@ -11,9 +11,9 @@ from utils.logger import Logger
 from models.actor_critic import ActorCritic
 
 parser = argparse.ArgumentParser(description="Food delivery systems")
-parser.add_argument("--eval", type=bool, default=False, help="Determine the mode")
+parser.add_argument("--eval", type=bool, default=True, help="Determine the mode")
 parser.add_argument("--log_root", type=str, default="./assets/", help="Log root")
-parser.add_argument("--resume_dir", type=str, default="", help="Resume from a specific directory")
+parser.add_argument("--resume_dir", type=str, default="./assets/log_20201214_0012", help="Resume from a specific directory")
 parser.add_argument("--city_size", type=int, default=64, help="Size of the city map")
 parser.add_argument("--seed", type=int, default=0, help="Random seed")
 parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
@@ -47,33 +47,14 @@ torch.backends.cudnn.deterministic = True
 
 def main():
     # setup logger
-    if args.resume_dir == "":
-        date = str(datetime.datetime.now())
-        date = date[:date.rfind(":")].replace("-", "") \
-            .replace(":", "") \
-            .replace(" ", "_")
-        log_dir = os.path.join(args.log_root, "log_" + date)
-    else:
-        log_dir = args.resume_dir
+    log_dir = args.resume_dir
     hparams_file = os.path.join(log_dir, "hparams.json")
     checkpoints_dir = os.path.join(log_dir, "checkpoints")
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    if not os.path.exists(checkpoints_dir):
-        os.makedirs(checkpoints_dir)
-    if args.resume_dir == "":
-        # write hparams
-        with open(hparams_file, "w") as f:
-            json.dump(args.__dict__, f, indent=2)
     log_file = os.path.join(log_dir, "log_train.txt")
     logger = Logger(log_file)
-    # logger.info(args)
-    logger.info("The args corresponding to training process are: ")
-    for (key, value) in vars(args).items():
-        logger.info("{key:20}: {value:}".format(key=key, value=value))
 
     actor_critic = ActorCritic(args, log_dir, checkpoints_dir)
-    actor_critic.train()
+    actor_critic.evaluation()
 
 if __name__ == "__main__":
     main()
