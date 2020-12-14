@@ -159,7 +159,6 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
             break
     # create control one hot
     out_pickup_controls = np.zeros([1, params["num_delivers"]+1], dtype=np.int32)
-    out_pickup_controls[0, control] = 1
 
     # create people actions
     out_people_actions = []
@@ -179,7 +178,8 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
         # update pick up m
         picked = False
         pre_pickup_m = last_state[0, 1+3*(i+1)]
-        if control == i and np.sum(pre_pickup_m)<params["max_order"]:
+        if control == i and np.sum(pre_pickup_m)/params["pickup_reward"]<params["max_order"]:
+            out_pickup_controls[0, control] = 1
             picked = True
             last_pickup_m = last_state[0, 1]
             last_money_m = last_state[0, 2]
