@@ -110,18 +110,23 @@ def oneStepMove(pre_pos_map, people_action):
     # cast people action to prob 
     np_people_action = softmax(people_action.cpu().numpy().reshape([4,1]))
     prob = np.random.uniform(0,1)
+    out_people_action = np.zeros(1, 1, 4)
 
     if prob <= np_people_action[0]: # move up
         new_pos_ind[0] = np.max([new_pos_ind[0]-1, 0])
+        out_people_action[0, 0, 0] = 1
     elif prob <= np.sum(np_people_action[0:2]): # move down
         new_pos_ind[0] = np.min([new_pos_ind[0]+1, h-1])
+        out_people_action[0, 0, 1] = 1
     elif prob <= np.sum(np_people_action[0:3]): # move left
         new_pos_ind[1] = np.max([new_pos_ind[1]-1, 0])
+        out_people_action[0, 0, 2] = 1
     else: # move right
         new_pos_ind[1] = np.min([new_pos_ind[1]+1, w-1])
+        out_people_action[0, 0, 3] = 1
     new_pos_map = np.zeros_like(pre_pos_map)
     new_pos_map[tuple(new_pos_ind)] = 1
-    return new_pos_map, new_pos_ind
+    return new_pos_map, new_pos_ind, out_people_action
 
 def getNextStateReward(last_state, pickup_controls, people_actions, order_recorder, params):
     h, w = params['h'], params['w']
@@ -150,6 +155,13 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
         else:
             control = params["num_delivers"]-i+1
             break
+    # create control one hot
+    out_pickup_controls = np.zeros([1, params["num_delivers"]+1])
+    out_pickup_controls[0, control] = 1
+
+    # create people actions
+    out_people_actions = []
+
     # print("the control is")
     # print(control)
     # print(prob)
@@ -157,7 +169,8 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
 
     for i in range(params["num_delivers"]):
         # update pos map
-        new_pos_map, new_pos_ind = oneStepMove(last_state[0, 3*(i+1)], people_actions[i])
+        new_pos_map, new_pos_ind, out_people_action = oneStepMove(last_state[0, 3*(i+1)], people_actions[i])
+        out_people_actions.append(out_people_action)
         # print(new_pos_ind)
         states[0, 3*(i+1)] = new_pos_map
 
@@ -202,7 +215,11 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
     # when the order is reject
     if control == params["num_delivers"]:
         rewards = rewards + params["reject_cost"]
-    return states, rewards.reshape([1, 1]), order_recorder
+
+    # concate people actions
+    out_people_actions = np.concatenate(out_people_actions, axis=0)
+    
+    return states, rewards.reshape([1, 1]), order_recorder, out_pickup_controls, out_people_actions
 
 
 # this function returns the whole eposide of samples, given the 
@@ -257,13 +274,13 @@ def SampleEpisode(model, params=sample_params, duration=250):
         # people_actions = torch.from_numpy(people_actions)
 
         # get the rewards and next state in np structure
-        states, rewards, order_recorder = getNextStateReward(
+        states, rewards, order_recorder, out_pickup_controls, out_people_actions = getNextStateReward(
             last_state, pickup_controls, people_actions, order_recorder, params)
         print('cut:{reward}'.format(reward=rewards[0]))
         all_states.append(states)
         all_rewards.append(rewards)
-        all_pickup_controls.append(pickup_controls.cpu().numpy())
-        all_people_actions.append(people_actions.cpu().numpy())
+        all_pickup_controls.append(out_pickup_controls)
+        all_people_actions.append(out_people_actions)
         
 
     # construct the eposide
