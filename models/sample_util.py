@@ -108,14 +108,14 @@ def oneStepMove(pre_pos_map, people_action):
     pre_pos_ind = np.array(np.where(pre_pos_map==1)).reshape([2])
     new_pos_ind = pre_pos_ind
     # cast people action to prob 
-    people_action = softmax(people_action.numpy().reshape([4,1]))
+    np_people_action = softmax(people_action.cpu().numpy().reshape([4,1]))
     prob = np.random.uniform(0,1)
 
-    if prob <= people_action[0]: # move up
+    if prob <= np_people_action[0]: # move up
         new_pos_ind[0] = np.max([new_pos_ind[0]-1, 0])
-    elif prob <= np.sum(people_action[0:2]): # move down
+    elif prob <= np.sum(np_people_action[0:2]): # move down
         new_pos_ind[0] = np.min([new_pos_ind[0]+1, h-1])
-    elif prob <= np.sum(people_action[0:3]): # move left
+    elif prob <= np.sum(np_people_action[0:3]): # move left
         new_pos_ind[1] = np.max([new_pos_ind[1]-1, 0])
     else: # move right
         new_pos_ind[1] = np.min([new_pos_ind[1]+1, w-1])
@@ -131,7 +131,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
     # pickup map 1
     # money map 2
     # iternate: position of deliever, pickup position of deliever, money position of deliever 3*(i+1)
-    last_state = last_state.numpy()
+    last_state = last_state.cpu().numpy()
     states = np.zeros((1, 3+3*params["num_delivers"], h, w), np.float32)
     states[0, 0] = last_state[0, 0]     # map doesn't change
     states[0, 1] = generatePickupMap(sample_params).reshape([h, w]) # generate new pickup
@@ -140,12 +140,12 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
 
     # we need to determine pickup controls
     control = params["num_delivers"]
-    pickup_controls = softmax(pickup_controls.numpy().reshape([params["num_delivers"]+1, 1]))
+    np_pickup_controls = softmax(pickup_controls.cpu().numpy().reshape([params["num_delivers"]+1, 1]))
     prob = np.random.uniform(0, 1)
-    if prob<pickup_controls[0]:
+    if prob<np_pickup_controls[0]:
         control = 0
-    for i in range(len(pickup_controls)):
-        if prob < np.sum(pickup_controls[:params["num_delivers"]-i+1]):
+    for i in range(len(np_pickup_controls)):
+        if prob < np.sum(np_pickup_controls[:params["num_delivers"]-i+1]):
             continue
         else:
             control = params["num_delivers"]-i+1
@@ -241,8 +241,10 @@ def SampleEpisode(model, params=sample_params, duration=250):
     # states has size duration+1, while all other ones has size duration
     all_states.append(states)
     all_rewards = []
-    # all_pickup_controls = []
-    # all_people_actions = []
+    # duration, num_people+1
+    all_pickup_controls = []
+    # people number, 1, 4
+    all_people_actions = []
 
     for i in range(duration):
         # convert states from np into tensor
@@ -260,16 +262,16 @@ def SampleEpisode(model, params=sample_params, duration=250):
         print('cut:{reward}'.format(reward=rewards[0]))
         all_states.append(states)
         all_rewards.append(rewards)
-        # all_pickup_controls.append(pickup_controls.numpy())
-        # all_people_actions.append(people_actions.numpy())
+        all_pickup_controls.append(pickup_controls.cpu().numpy())
+        all_people_actions.append(people_actions.cpu().numpy())
         
 
     # construct the eposide
     eposide = {}
     eposide['states'] = torch.from_numpy(np.concatenate(all_states, axis=0))
     eposide['rewards'] = torch.from_numpy(np.concatenate(all_rewards, axis=0))
-    # eposide['pickup_controls'] = torch.from_numpy(np.concatenate(all_pickup_controls, axis=0))
-    # eposide['people_actions'] = torch.from_numpy(np.concatenate(all_people_actions, axis=0))
+    eposide['pickup_controls'] = torch.from_numpy(np.concatenate(all_pickup_controls, axis=0))
+    eposide['people_actions'] = torch.from_numpy(np.concatenate(all_people_actions, axis=1))
     # eposide['donws'] = torch.from_numpy(np.concatenate(all_dones, axis=0))
     return eposide
 
