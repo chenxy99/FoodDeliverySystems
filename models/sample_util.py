@@ -18,10 +18,10 @@ sample_params = {
     "abs": 100.0,
     "num_delivers": 3,
     "gas_cost": -1,
-    "reject_cost": -3,
-    "min_reward": 5,
-    "max_reward": 20,
-    "pickup_reward":2 ,
+    "reject_cost": -300,
+    "min_reward": 500,
+    "max_reward": 2000,
+    "pickup_reward": 200,
     "num_obstacle": int(5),
     "obstacle_ratio_h": 0.5,
     "obstacle_ratio_w": 0.5,
@@ -108,9 +108,9 @@ def oneStepMove(pre_pos_map, people_action):
     pre_pos_ind = np.array(np.where(pre_pos_map==1)).reshape([2])
     new_pos_ind = pre_pos_ind
     # cast people action to prob 
-    np_people_action = softmax(people_action.cpu().numpy().reshape([4,1]))
+    np_people_action = softmax(people_action.detach().cpu().numpy().reshape([4,1]))
     prob = np.random.uniform(0,1)
-    out_people_action = np.zeros(1, 1, 4)
+    out_people_action = np.zeros((1, 1, 4), dtype=np.int32)
 
     if prob <= np_people_action[0]: # move up
         new_pos_ind[0] = np.max([new_pos_ind[0]-1, 0])
@@ -145,7 +145,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
 
     # we need to determine pickup controls
     control = params["num_delivers"]
-    np_pickup_controls = softmax(pickup_controls.cpu().numpy().reshape([params["num_delivers"]+1, 1]))
+    np_pickup_controls = softmax(pickup_controls.detach().cpu().numpy().reshape([params["num_delivers"]+1, 1]))
     prob = np.random.uniform(0, 1)
     if prob<np_pickup_controls[0]:
         control = 0
@@ -156,7 +156,7 @@ def getNextStateReward(last_state, pickup_controls, people_actions, order_record
             control = params["num_delivers"]-i+1
             break
     # create control one hot
-    out_pickup_controls = np.zeros([1, params["num_delivers"]+1])
+    out_pickup_controls = np.zeros([1, params["num_delivers"]+1], dtype=np.int32)
     out_pickup_controls[0, control] = 1
 
     # create people actions
@@ -276,7 +276,7 @@ def SampleEpisode(model, params=sample_params, duration=250):
         # get the rewards and next state in np structure
         states, rewards, order_recorder, out_pickup_controls, out_people_actions = getNextStateReward(
             last_state, pickup_controls, people_actions, order_recorder, params)
-        print('cut:{reward}'.format(reward=rewards[0]))
+        # print('cut:{reward}'.format(reward=rewards[0]))
         all_states.append(states)
         all_rewards.append(rewards)
         all_pickup_controls.append(out_pickup_controls)
@@ -286,7 +286,7 @@ def SampleEpisode(model, params=sample_params, duration=250):
     # construct the eposide
     eposide = {}
     eposide['states'] = torch.from_numpy(np.concatenate(all_states, axis=0))
-    eposide['rewards'] = torch.from_numpy(np.concatenate(all_rewards, axis=0))
+    eposide['rewards'] = torch.from_numpy(np.concatenate(all_rewards, axis=0).astype(np.float32))
     eposide['pickup_controls'] = torch.from_numpy(np.concatenate(all_pickup_controls, axis=0))
     eposide['people_actions'] = torch.from_numpy(np.concatenate(all_people_actions, axis=1))
     # eposide['donws'] = torch.from_numpy(np.concatenate(all_dones, axis=0))
@@ -297,7 +297,7 @@ class OrderPack(object):
     def __init__(self, num_delivers, max_order, params):
         # order_h,order_w, money_h, money_w, reward, picked
         # reward=0 indicates empty
-        self.data = np.zeros([num_delivers, max_order, 6])
+        self.data = np.zeros([num_delivers, max_order, 6], dtype=np.float32)
         self.num_delivers = num_delivers
         self.max_order = max_order
         self.params = params
