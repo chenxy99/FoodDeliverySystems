@@ -23,6 +23,7 @@ sample_params = {
     "max_reward": 2000,
     "pickup_reward": 200,
     "num_obstacle": int(5),
+    "obstacle_min_ratio": 0.5,
     "obstacle_ratio_h": 0.5,
     "obstacle_ratio_w": 0.5,
     "max_order": 2
@@ -41,7 +42,8 @@ def addObstacle(m, ys, xs, params):
         h2 = int(min(h-1, y+0.5*poly_h))
         w1 = int(max(0, x-0.5*poly_w))
         w2 = int(min(w-1, x+0.5*poly_w))
-        m[h1:h2, w1:w2] = np.minimum(m[h1:h2, w1:w2], -params["abs"]*np.random.uniform())
+        m[h1:h2, w1:w2] = np.minimum(m[h1:h2, w1:w2], -params["abs"]*np.random.uniform(
+            low=params["obstacle_min_ratio"], high=1))
         mask[h1:h2, w1:w2] = 1
     return m, mask
 
