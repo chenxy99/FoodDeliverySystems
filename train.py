@@ -14,24 +14,25 @@ parser = argparse.ArgumentParser(description="Food delivery systems")
 parser.add_argument("--eval", type=bool, default=False, help="Determine the mode")
 parser.add_argument("--log_root", type=str, default="./assets/", help="Log root")
 parser.add_argument("--resume_dir", type=str, default="", help="Resume from a specific directory")
-parser.add_argument("--city_size", type=int, default=64, help="Size of the city map")
+parser.add_argument("--city_size", type=int, default=16, help="Size of the city map")
 parser.add_argument("--seed", type=int, default=0, help="Random seed")
-parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
+parser.add_argument("--weight_decay", type=float, default=5e-5, help="Weight decay")
 parser.add_argument("--clip", type=float, default=12.5, help="Gradient clipping")
 parser.add_argument("--log_every", type=int, default=100, help="Log step")
 parser.add_argument("--smooth_factor", type=float, default=0.6, help="Smooth factor")
+parser.add_argument("--warmup_percent", type=float, default=0.1, help="The portion of the warmup iteration")
 
 # Actor
-parser.add_argument("--beta", type=float, default=0.1, help="Entropy regularization weight")
-parser.add_argument("--alpha_a", type=float, default=1e-4, help="Actor learning rate")
+parser.add_argument("--beta", type=float, default=0.001, help="Entropy regularization weight")
+parser.add_argument("--alpha_a", type=float, default=5e-6, help="Actor learning rate")
 
 # Critic
-parser.add_argument("--alpha_c", type=float, default=1e-4, help="Critic learning rate")
+parser.add_argument("--alpha_c", type=float, default=5e-6, help="Critic learning rate")
 
 # Agent
 parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
 parser.add_argument("--lam", type=float, default=0.97, help="Soft choice for GAE")
-parser.add_argument("--duration", type=int, default=200, help="Length of the samples (s_t, a_t, r_t, s_t')")
+parser.add_argument("--duration", type=int, default=250, help="Length of the samples (s_t, a_t, r_t, s_t')")
 parser.add_argument("--episode", type=int, default=100000, help="Number of the total episodes")
 parser.add_argument("--num_people", type=int, default=3, help="Number of people")
 

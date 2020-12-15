@@ -41,11 +41,25 @@ class ActorCritic(nn.Module):
         else:
             self.initialize()
 
-    def one_iteration(self):
-        if self.args.eval:
-            self.duration = self.args.duration
+        self.lr_actor_scheduler = optim.lr_scheduler.LambdaLR(self.actor_optimizer,
+                                                         lr_lambda=self.lr_lambda, last_epoch=self.iteration)
+        self.lr_critic_scheduler = optim.lr_scheduler.LambdaLR(self.critic_optimizer,
+                                                          lr_lambda=self.lr_lambda, last_epoch=self.iteration)
+
+    def lr_lambda(self, iteration):
+        if iteration <= self.args.episode * self.args.warmup_percent:
+            return iteration / (self.args.episode * self.args.warmup_percent)
         else:
-            self.duration = int(self.current_eposide / float(self.args.episode) * self.args.duration) + 2
+            return 1 - (iteration - self.args.episode * self.args.warmup_percent) / \
+                   (self.args.episode * (1.0 - self.args.warmup_percent))
+
+
+    def one_iteration(self):
+        # if self.args.eval:
+        #     self.duration = self.args.duration
+        # else:
+        #     self.duration = int(self.current_eposide / float(self.args.episode) * self.args.duration) + 2
+        self.duration = self.args.duration
         batch = SampleEpisode(self, duration=self.duration)
         # for testing
         # batch = dict()
@@ -90,9 +104,12 @@ class ActorCritic(nn.Module):
         logprob_people_actions = torch.stack(people_actions_list, dim=0)
         logprob_people_actions = logprob_people_actions.sum(0)
 
+        if (batch["pickup_controls"] == 1).sum() == 0:
+            logprob_pickup_controls = logprob_people_actions.data * 0
         loss_value = F.mse_loss(v_preds, v_targets, reduction="mean")
-        loss_policy = - ((logprob_pickup_controls + logprob_people_actions).unsqueeze(-1) * advs +
-                         self.args.beta * (H_pickup_controls + H_people_actions).unsqueeze(-1)).mean()
+        loss_policy = - (logprob_pickup_controls.mean() + logprob_people_actions.mean() +
+                         self.args.beta * H_pickup_controls.mean() + self.args.beta * H_people_actions.mean()
+        )
 
         loss = loss_value + loss_policy
         loss.backward()
@@ -113,6 +130,10 @@ class ActorCritic(nn.Module):
                 self.one_iteration()
                 self.tensorboard_writer.add_scalar("reward", self.current_metric, eposide)
                 self.tensorboard_writer.add_scalar("duration", self.duration, eposide)
+                self.tensorboard_writer.add_scalar("actor_learning_rate", self.actor_optimizer.param_groups[0]["lr"],
+                                                   eposide)
+                self.tensorboard_writer.add_scalar("critic_learning_rate", self.critic_optimizer.param_groups[0]["lr"],
+                                                   eposide)
 
                 if eposide % self.args.log_every == 0 and eposide > 0:
                     # save
@@ -120,6 +141,8 @@ class ActorCritic(nn.Module):
                     self.critic_checkpoint_manager.step(self.current_metric)
                     self.best_metric = self.actor_checkpoint_manager.get_best_metric()
                     self.record_manager.save(0, eposide, self.best_metric, self.current_metric)
+                self.lr_actor_scheduler.step()
+                self.lr_critic_scheduler.step()
                 pbar.update(1)
 
     def evaluation(self):
@@ -230,15 +253,15 @@ class Actor(nn.Module):
     def __init__(self, args):
         super(Actor, self).__init__()
         self.args = args
-        self.ratio = 32
+        self.ratio = 16
         self.input = self.args.num_people * 3 + 3
         self.conv_1 = nn.Conv2d(self.input, 32, kernel_size=3, padding=1, stride=2, bias=True)
         self.conv_2 = nn.Conv2d(32, 64, kernel_size=3, padding=1, stride=2, bias=True)
         self.conv_3 = nn.Conv2d(64, 64, kernel_size=3, padding=1, stride=2, bias=True)
         self.conv_4 = nn.Conv2d(64, 128, kernel_size=3, padding=1, stride=2, bias=True)
-        self.conv_5 = nn.Conv2d(128, 256, kernel_size=3, padding=1, stride=2, bias=True)
-        self.pickup_control = nn.Linear(256 * (self.args.city_size // self.ratio) ** 2, self.args.num_people + 1)
-        self.people_actions = nn.ModuleList([nn.Linear(256 * (self.args.city_size // self.ratio) ** 2, 4)
+        # self.conv_5 = nn.Conv2d(128, 256, kernel_size=3, padding=1, stride=2, bias=True)
+        self.pickup_control = nn.Linear(128 * (self.args.city_size // self.ratio) ** 2, self.args.num_people + 1)
+        self.people_actions = nn.ModuleList([nn.Linear(128 * (self.args.city_size // self.ratio) ** 2, 4)
                                              for _ in range(self.args.num_people)])
 
         self.init_weights()
@@ -248,7 +271,7 @@ class Actor(nn.Module):
         x = F.relu(self.conv_2(x))
         x = F.relu(self.conv_3(x))
         x = F.relu(self.conv_4(x))
-        x = F.relu(self.conv_5(x))
+        # x = F.relu(self.conv_5(x))
         x = x.reshape(x.shape[0], -1)
         pickup_controls = self.pickup_control(x)
         people_actions = [self.people_actions[i](x) for i in range(self.args.num_people)]
@@ -275,21 +298,21 @@ class Critic(nn.Module):
     def __init__(self, args):
         super(Critic, self).__init__()
         self.args = args
-        self.ratio = 32
+        self.ratio = 16
         self.input = self.args.num_people * 3 + 3
         self.conv_1 = nn.Conv2d(self.input, 32, kernel_size=3, padding=1, stride=2, bias=True)
         self.conv_2 = nn.Conv2d(32, 64, kernel_size=3, padding=1, stride=2, bias=True)
         self.conv_3 = nn.Conv2d(64, 64, kernel_size=3, padding=1, stride=2, bias=True)
         self.conv_4 = nn.Conv2d(64, 128, kernel_size=3, padding=1, stride=2, bias=True)
-        self.conv_5 = nn.Conv2d(128, 256, kernel_size=3, padding=1, stride=2, bias=True)
-        self.fc = nn.Linear(256 * (self.args.city_size // self.ratio) ** 2, 1)
+        # self.conv_5 = nn.Conv2d(128, 256, kernel_size=3, padding=1, stride=2, bias=True)
+        self.fc = nn.Linear(128 * (self.args.city_size // self.ratio) ** 2, 1)
 
     def forward(self, input):
         x = F.relu(self.conv_1(input))
         x = F.relu(self.conv_2(x))
         x = F.relu(self.conv_3(x))
         x = F.relu(self.conv_4(x))
-        x = F.relu(self.conv_5(x))
+        # x = F.relu(self.conv_5(x))
         y = self.fc(x.reshape(x.shape[0], -1))
 
         return y
