@@ -30,10 +30,11 @@ parser.add_argument("--alpha_a", type=float, default=5e-6, help="Actor learning 
 parser.add_argument("--alpha_c", type=float, default=5e-6, help="Critic learning rate")
 
 # Agent
+parser.add_argument("--gae", type=bool, default=False, help="Whether to use GAE")
 parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
 parser.add_argument("--lam", type=float, default=0.97, help="Soft choice for GAE")
 parser.add_argument("--duration", type=int, default=250, help="Length of the samples (s_t, a_t, r_t, s_t')")
-parser.add_argument("--episode", type=int, default=100000, help="Number of the total episodes")
+parser.add_argument("--episode", type=int, default=10000, help="Number of the total episodes")
 parser.add_argument("--num_people", type=int, default=3, help="Number of people")
 
 args = parser.parse_args()

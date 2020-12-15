@@ -12,7 +12,7 @@ import os
 from tqdm import tqdm
 
 import models.math_util as math_util
-from models.sample_util import SampleEpisode
+from models.sample_util import SampleEpisode, SampleTestEpisode
 from utils.recording import RecordManager
 from utils.checkpointing import CheckpointManager
 
@@ -40,11 +40,10 @@ class ActorCritic(nn.Module):
             self.load_optimal_parameters()
         else:
             self.initialize()
-
-        self.lr_actor_scheduler = optim.lr_scheduler.LambdaLR(self.actor_optimizer,
-                                                         lr_lambda=self.lr_lambda, last_epoch=self.iteration)
-        self.lr_critic_scheduler = optim.lr_scheduler.LambdaLR(self.critic_optimizer,
-                                                          lr_lambda=self.lr_lambda, last_epoch=self.iteration)
+            self.lr_actor_scheduler = optim.lr_scheduler.LambdaLR(self.actor_optimizer,
+                                                             lr_lambda=self.lr_lambda, last_epoch=self.iteration)
+            self.lr_critic_scheduler = optim.lr_scheduler.LambdaLR(self.critic_optimizer,
+                                                              lr_lambda=self.lr_lambda, last_epoch=self.iteration)
 
     def lr_lambda(self, iteration):
         if iteration <= self.args.episode * self.args.warmup_percent:
@@ -90,7 +89,10 @@ class ActorCritic(nn.Module):
         # get the predictions of each states from critic excluding the last state
         v_preds = self.critic(batch["states"][:-1])
         # get the advantage estimations and the target value function
-        advs, v_targets = self.calc_GAE_advs_v_target(batch, v_preds)
+        if self.args.gae == True:
+            advs, v_targets = self.calc_GAE_advs_v_target(batch, v_preds)
+        else:
+            advs, v_targets = self.calc_nsteps_advs_v_target(batch, v_preds)
         # get the policy of each actions given a specific state
         pickup_controls, people_actions = self.actor(batch["states"][:-1])
         # calcuate the entropy of each policy
@@ -146,11 +148,13 @@ class ActorCritic(nn.Module):
                 pbar.update(1)
 
     def evaluation(self):
-        if self.args.eval:
-            self.duration = self.args.duration
-        else:
-            self.duration = int(self.current_eposide / float(self.args.episode) * self.args.duration) + 2
+        # if self.args.eval:
+        #     self.duration = self.args.duration
+        # else:
+        #     self.duration = int(self.current_eposide / float(self.args.episode) * self.args.duration) + 2
+        self.duration = self.args.duration
         with torch.no_grad():
+            # batch = SampleTestEpisode(self, duration=self.duration)
             batch = SampleEpisode(self, duration=self.duration)
             # for testing
             batch["dones"] = torch.ones((self.duration, 1))
@@ -184,6 +188,23 @@ class ActorCritic(nn.Module):
         gaes = math_util.calc_GAEs(batch["rewards"], batch["dones"], v_all_preds, self.args.gamma, self.args.lam)
         v_targets = gaes + v_pred_detach[-1]
         advs = math_util.standardize(v_targets)
+        return advs, v_targets
+
+    def calc_nsteps_advs_v_target(self, batch, v_preds):
+        '''
+        Calculate nstep, and advs = rets - v_pred[-1], v_targets = rets
+        :param batch:
+        :param v_preds: the value function of all the T states, excluding the last states
+        :return advs: advantage estimation
+                v_targets: value function target
+        '''
+        v_pred_detach = v_preds.detach()
+        with torch.no_grad():
+            last_pred = self.critic(batch["states"][-1].unsqueeze(0))
+        v_all_preds = torch.cat([v_pred_detach, last_pred], dim=0)
+        rets = math_util.calc_nsteps(batch["rewards"], batch["dones"], v_all_preds[-1], self.args.gamma)
+        v_targets = rets
+        advs = rets - v_all_preds[-1]
         return advs, v_targets
 
     def initialize(self):

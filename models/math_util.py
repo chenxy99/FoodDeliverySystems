@@ -17,6 +17,18 @@ def calc_GAEs(rewards, dones, hatvs, gamma, lam):
         gaes[t] = future_gae
     return gaes
 
+def calc_nsteps(rewards, dones, next_hatvs, gamma):
+    total_duration = len(rewards)
+    # next_hatvs is the last state of the reward function
+    rets = torch.zeros_like(rewards)
+    future_ret = next_hatvs
+    # dones is used to indicate the episode boundary
+    not_dones = 1 - dones
+    for t in reversed(range(total_duration)):
+        future_ret = rewards[t] + future_ret * gamma * not_dones[t]
+        rets[t] = future_ret
+    return rets
+
 def standardize(v):
     '''Method to standardize a rank-1 np array'''
     assert len(v) > 1, 'Cannot standardize vector of size 1'
