@@ -350,4 +350,188 @@ class OrderPack(object):
                 break
         return ans
 
+
+# from this part, we produce the eposide in the testing phase, where the pickup control and 
+# people actions are not random
+def oneStepTestMove(pre_pos_map, people_action):
+    h, w = pre_pos_map.shape
+    pre_pos_ind = np.array(np.where(pre_pos_map==1)).reshape([2])
+    new_pos_ind = pre_pos_ind
+    # cast people action to prob 
+    np_people_action = softmax(people_action.detach().cpu().numpy().reshape([4,1]))
+    action = np.argmax(np_people_action)
+    out_people_action = np.zeros((1, 1, 4), dtype=np.int32)
+
+    if action == 0: # move up
+        new_pos_ind[0] = np.max([new_pos_ind[0]-1, 0])
+        out_people_action[0, 0, 0] = 1
+    elif action == 1: # move down
+        new_pos_ind[0] = np.min([new_pos_ind[0]+1, h-1])
+        out_people_action[0, 0, 1] = 1
+    elif action == 2: # move left
+        new_pos_ind[1] = np.max([new_pos_ind[1]-1, 0])
+        out_people_action[0, 0, 2] = 1
+    else: # move right
+        new_pos_ind[1] = np.min([new_pos_ind[1]+1, w-1])
+        out_people_action[0, 0, 3] = 1
+    new_pos_map = np.zeros_like(pre_pos_map)
+    new_pos_map[tuple(new_pos_ind)] = 1
+    return new_pos_map, new_pos_ind, out_people_action
+
+
+def getNextTestStateReward(last_state, pickup_controls, people_actions, order_recorder, params):
+    h, w = params['h'], params['w']
+    # we generate the initial state
+    # the channel order of states are
+    # map 0
+    # pickup map 1
+    # money map 2
+    # iternate: position of deliever, pickup position of deliever, money position of deliever 3*(i+1)
+    last_state = last_state.cpu().numpy()
+    states = np.zeros((1, 3+3*params["num_delivers"], h, w), np.float32)
+    states[0, 0] = last_state[0, 0]     # map doesn't change
+    states[0, 1] = generatePickupMap(sample_params).reshape([h, w]) # generate new pickup
+    states[0, 2] = generateMoneyMap(sample_params).reshape([h, w]) # generate new money
+    rewards = 0
+
+    # we need to determine pickup controls
+    control = params["num_delivers"]
+    np_pickup_controls = softmax(pickup_controls.detach().cpu().numpy().reshape([params["num_delivers"]+1, 1]))
+    control = np.argmax(np_pickup_controls)
+    # create control one hot
+    out_pickup_controls = np.zeros([1, params["num_delivers"]+1], dtype=np.int32)
+
+    # create people actions
+    out_people_actions = []
+
+    # print("the control is")
+    # print(control)
+    # print(prob)
+    # print(pickup_controls)
+
+    for i in range(params["num_delivers"]):
+        # update pos map
+        new_pos_map, new_pos_ind, out_people_action = oneStepTestMove(last_state[0, 3*(i+1)], people_actions[i])
+        out_people_actions.append(out_people_action)
+        # print(new_pos_ind)
+        states[0, 3*(i+1)] = new_pos_map
+
+        # update pick up m
+        picked = False
+        pre_pickup_m = last_state[0, 1+3*(i+1)]
+        if control == i and np.sum(pre_pickup_m)/params["pickup_reward"]<params["max_order"]:
+            out_pickup_controls[0, control] = 1
+            picked = True
+            last_pickup_m = last_state[0, 1]
+            last_money_m = last_state[0, 2]
+            pre_pickup_m = pre_pickup_m + last_pickup_m
+            states[0, 1+3*(i+1)] = pre_pickup_m
+            # add new order to order pack
+            order_ind = np.array(np.where(last_pickup_m>0)).reshape([2])
+            money_ind = np.array(np.where(last_money_m>0)).reshape([2])
+            order_recorder.add_order(i, order_ind, money_ind, np.sum(last_money_m))
+
+        if pre_pickup_m[tuple(new_pos_ind)] > 0:
+            pick_reward = order_recorder.pick_order(i, new_pos_ind)
+            rewards = rewards + pick_reward
+            pre_pickup_m[tuple(new_pos_ind)] = pre_pickup_m[tuple(new_pos_ind)] - pick_reward
+            # print(pre_pickup_m[tuple(new_pos_ind)])
+        states[0, 1+3*(i+1)] = pre_pickup_m
+
+        # update money m
+        pre_money_m = last_state[0, 2+3*(i+1)]
+        if picked: # means the order is accept
+            pre_money_m = last_state[0, 2+3*(i+1)]
+            last_money_m = last_state[0, 2]
+            pre_money_m = pre_money_m + last_money_m
+        if pre_money_m[tuple(new_pos_ind)] > 0: # possible to finish an order
+            money_reward = order_recorder.finish_order(i, new_pos_ind)
+            rewards = rewards + money_reward
+            # print(pre_money_m[tuple(new_pos_ind)])
+            pre_money_m[tuple(new_pos_ind)] = pre_money_m[tuple(new_pos_ind)] - money_reward
+        states[0, 2+3*(i+1)] = pre_money_m
+        
+        # calculate gas cost rewards
+        rewards = rewards + states[0, 0, new_pos_ind[0], new_pos_ind[1]]
+        # print(states[0, 0, new_pos_ind[0], new_pos_ind[1]])
+
+    # when the order is reject
+    if control == params["num_delivers"]:
+        rewards = rewards + params["reject_cost"]
+
+    # concate people actions
+    out_people_actions = np.concatenate(out_people_actions, axis=0)
+    
+    return states, rewards.reshape([1, 1]), order_recorder, out_pickup_controls, out_people_actions
+
+# this function returns the whole eposide of samples, given the 
+def SampleTestEpisode(model, params=sample_params, duration=250):
+    eposide = []
+    # we generate the initial state
+    # the channel order of states are
+    # map
+    # pickup map
+    # money map
+    # iternate: position of deliever, pickup position of deliever, money position of deliever
+    states = []
+    h, w = params['h'], params['w']
+    m, obs_mask = generateMap(sample_params)
+    m = m.reshape([1, h, w])
+    states.append(m)
+    pickup_m = generatePickupMap(sample_params).reshape([1, h, w])
+    states.append(pickup_m)
+    money_m = generateMoneyMap(sample_params).reshape([1, h, w])
+    states.append(money_m)
+
+    # here we create a order pack to record whether the food of a order has already been collected
+    # h,w,reward
+    order_recorder = OrderPack(params["num_delivers"], params["max_order"], params)
+
+    for i in range(params["num_delivers"]):
+        pos_map = generatePosMap(obs_mask, params).reshape([1, h, w])
+        pre_pickup_m = np.zeros([1, h, w], dtype=np.float32)
+        pre_money_m = np.zeros([1, h, w], dtype=np.float32)
+        states.append(pos_map)
+        states.append(pre_pickup_m)
+        states.append(pre_money_m)
+
+    states = np.concatenate(states, axis=0).reshape([1, 3+3*params["num_delivers"], h, w])
+    all_states = []
+    # states has size duration+1, while all other ones has size duration
+    all_states.append(states)
+    all_rewards = []
+    # duration, num_people+1
+    all_pickup_controls = []
+    # people number, 1, 4
+    all_people_actions = []
+
+    for i in range(duration):
+        # convert states from np into tensor
+        last_state = torch.from_numpy(all_states[-1])
+        last_state = last_state.cuda()
+        pickup_controls, people_actions = model.actor(last_state)
+        # pickup_controls = np.random.randn(1, 4)
+        # pickup_controls = torch.from_numpy(pickup_controls)
+        # people_actions = np.random.randn(4, 1, 4)
+        # people_actions = torch.from_numpy(people_actions)
+
+        # get the rewards and next state in np structure
+        states, rewards, order_recorder, out_pickup_controls, out_people_actions = getNextTestStateReward(
+            last_state, pickup_controls, people_actions, order_recorder, params)
+        # print('cut:{reward}'.format(reward=rewards[0]))
+        all_states.append(states)
+        all_rewards.append(rewards)
+        all_pickup_controls.append(out_pickup_controls)
+        all_people_actions.append(out_people_actions)
+        
+
+    # construct the eposide
+    eposide = {}
+    eposide['states'] = torch.from_numpy(np.concatenate(all_states, axis=0))
+    eposide['rewards'] = torch.from_numpy(np.concatenate(all_rewards, axis=0).astype(np.float32))
+    eposide['pickup_controls'] = torch.from_numpy(np.concatenate(all_pickup_controls, axis=0))
+    eposide['people_actions'] = torch.from_numpy(np.concatenate(all_people_actions, axis=1))
+    # eposide['donws'] = torch.from_numpy(np.concatenate(all_dones, axis=0))
+    return eposide
+
 # SampleEpisode(0)
