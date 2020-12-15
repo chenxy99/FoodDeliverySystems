@@ -13,20 +13,20 @@ epsilon = 1e-8
 
 # some sample params
 sample_params = {
-    "h": 16,
-    "w": 16,
+    "h": 64,
+    "w": 64,
     "abs": 100.0,
     "num_delivers": 3,
     "gas_cost": -1,
-    "reject_cost": -30,
-    "min_reward": 1000,
+    "reject_cost": -300,
+    "min_reward": 500,
     "max_reward": 2000,
     "pickup_reward": 200,
     "num_obstacle": int(5),
     "obstacle_min_ratio": 0.5,
     "obstacle_ratio_h": 0.5,
     "obstacle_ratio_w": 0.5,
-    "max_order": 5
+    "max_order": 2
 }
 
 
@@ -58,7 +58,7 @@ def generateMap(params=sample_params):
     # add in number of obstacle
     ys = np.random.randint(0, h, size=(params["num_obstacle"]))
     xs = np.random.randint(0, w, size=(params["num_obstacle"]))
-    # obs_mask is a mask indicate the position of obstacles, 
+    # obs_mask is a mask indicate the position of obstacles,
     # where 1 indicate the existence of obstacles
     m, obs_mask = addObstacle(m, ys, xs, params)
 
@@ -112,7 +112,7 @@ def oneStepMove(pre_pos_map, people_action):
     h, w = pre_pos_map.shape
     pre_pos_ind = np.array(np.where(pre_pos_map == 1)).reshape([2])
     new_pos_ind = pre_pos_ind
-    # cast people action to prob 
+    # cast people action to prob
     np_people_action = softmax(people_action.detach().cpu().numpy().reshape([4, 1]))
     prob = np.random.uniform(0, 1)
     out_people_action = np.zeros((1, 1, 4), dtype=np.int32)
