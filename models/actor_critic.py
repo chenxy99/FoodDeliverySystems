@@ -1,3 +1,6 @@
+'''
+Some codes are refered from https://github.com/kengz/SLM-Lab, thanks for their hard works
+'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

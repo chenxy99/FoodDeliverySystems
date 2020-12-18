@@ -12,7 +12,7 @@ from models.actor_critic import ActorCritic
 
 parser = argparse.ArgumentParser(description="Food delivery systems")
 parser.add_argument("--eval", type=bool, default=False, help="Determine the mode")
-parser.add_argument("--log_root", type=str, default="./assets/", help="Log root")
+parser.add_argument("--log_root", type=str, default="./assets/nsteps/person", help="Log root")
 parser.add_argument("--resume_dir", type=str, default="", help="Resume from a specific directory")
 parser.add_argument("--city_size", type=int, default=16, help="Size of the city map")
 parser.add_argument("--seed", type=int, default=0, help="Random seed")
@@ -30,10 +30,10 @@ parser.add_argument("--alpha_a", type=float, default=5e-6, help="Actor learning 
 parser.add_argument("--alpha_c", type=float, default=5e-6, help="Critic learning rate")
 
 # Agent
-parser.add_argument("--gae", type=bool, default=False, help="Whether to use GAE")
+parser.add_argument("--gae", type=bool, default=True, help="Whether to use GAE")
 parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
 parser.add_argument("--lam", type=float, default=0.97, help="Soft choice for GAE")
-parser.add_argument("--duration", type=int, default=250, help="Length of the samples (s_t, a_t, r_t, s_t')")
+parser.add_argument("--duration", type=int, default=400, help="Length of the samples (s_t, a_t, r_t, s_t')")
 parser.add_argument("--episode", type=int, default=10000, help="Number of the total episodes")
 parser.add_argument("--num_people", type=int, default=3, help="Number of people")
 

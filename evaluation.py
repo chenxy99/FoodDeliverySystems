@@ -13,7 +13,7 @@ from models.actor_critic import ActorCritic
 parser = argparse.ArgumentParser(description="Food delivery systems")
 parser.add_argument("--eval", type=bool, default=True, help="Determine the mode")
 parser.add_argument("--log_root", type=str, default="./assets/", help="Log root")
-parser.add_argument("--resume_dir", type=str, default="./assets/log_20201215_0011", help="Resume from a specific directory")
+parser.add_argument("--resume_dir", type=str, default="", help="Resume from a specific directory")
 parser.add_argument("--city_size", type=int, default=16, help="Size of the city map")
 parser.add_argument("--seed", type=int, default=0, help="Random seed")
 parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
